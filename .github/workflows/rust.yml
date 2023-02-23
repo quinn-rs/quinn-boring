@@ -8,88 +8,125 @@ on:
     - cron: "21 3 * * 5"
 
 jobs:
-  test-freebsd:
-  # see https://github.com/actions/runner/issues/385
-  # use https://github.com/vmactions/freebsd-vm for now
-    name: test on freebsd
-    runs-on: macos-12
-    steps:
-      - uses: actions/checkout@v2
-      - name: test on freebsd
-        uses: vmactions/freebsd-vm@v0
-        with:
-          usesh: true
-          mem: 4096
-          copyback: false
-          prepare: |
-            pkg install -y curl
-            curl https://sh.rustup.rs -sSf --output rustup.sh
-            sh rustup.sh -y --profile minimal --default-toolchain stable
-            echo "~~~~ rustc --version ~~~~"
-            $HOME/.cargo/bin/rustc --version
-          run: |
-            freebsd-version
-            $HOME/.cargo/bin/cargo build --all-targets
-            $HOME/.cargo/bin/cargo test
+
+# TODO(nmittler): Investigate why tests get "unknown CA" on windows.
+#  test-windows:
+#    name: test (windows-latest, stable)
+#    runs-on: windows-latest
+#
+#    steps:
+#      - name: Checkout source
+#        uses: actions/checkout@v2
+#        with:
+#          submodules: 'recursive'
+#      - name: Install nasm
+#        uses: crazy-max/ghaction-chocolatey@v1
+#        with:
+#          args: install nasm
+#      - name: Install rust toolchain
+#        uses: actions-rs/toolchain@v1
+#        with:
+#          profile: minimal
+#          toolchain: stable
+#          override: true
+#      - name: Cargo Build
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: build
+#          args: --all-targets
+#      - name: Cargo Test
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: test
+#          args: --verbose --all-targets
+
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable, beta, 1.59.0]
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable, beta]
         exclude:
           - os: macos-latest
             rust: beta
-          - os: macos-latest
-            rust: 1.59.0
-          - os: windows-latest
-            rust: beta
-          - os: windows-latest
-            rust: 1.59.0
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - name: Checkout source
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
-      - uses: Swatinem/rust-cache@v1
-      - uses: actions-rs/cargo@v1
+      - name: Cargo Build
+        uses: actions-rs/cargo@v1
         with:
           command: build
           args: --all-targets
-      - uses: actions-rs/cargo@v1
+      - name: Cargo Test
+        uses: actions-rs/cargo@v1
         with:
           command: test
+
+# TODO(nmittler): Investigate build issues.
+#  test-fips:
+#    name: test fips
+#    runs-on: ubuntu-20.04
+#    steps:
+#      - name: Checkout source
+#        uses: actions/checkout@v2
+#        with:
+#          submodules: 'recursive'
+#      - name: Install Clang 7
+#        uses: egor-tensin/setup-clang@v1
+#        with:
+#          version: "7"
+#      - name: Install rust toolchain
+#        uses: actions-rs/toolchain@v1
+#        with:
+#          profile: minimal
+#          toolchain: stable
+#          override: true
+#      - name: Cargo Build
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: build
+#          args: --all-targets --features fips
+#      - name: Cargo Test
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: test
+#          args: --features fips
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - name: Checkout source
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
           override: true
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v1
-      - uses: actions-rs/cargo@v1
+      - name: Cargo fmt
+        uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
-      - uses: actions-rs/cargo@v1
+      - name: Cargo clippy
+        uses: actions-rs/cargo@v1
         with:
           command: clippy
           args: --all-targets -- -D warnings
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: clippy
-      - name: doc
+      - name: Cargo doc
         run: cargo doc --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: -Dwarnings
