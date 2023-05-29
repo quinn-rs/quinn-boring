@@ -30,7 +30,7 @@ tracing = "0.1"
 anyhow = "1.0.22"
 assert_hex = "0.2.2"
 assert_matches = "1.1"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.3", features = ["derive"] }
 directories-next = "2"
 hex-literal = "0.4.1"
 ring = "0.16.7"
