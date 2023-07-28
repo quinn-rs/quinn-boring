@@ -330,7 +330,7 @@ impl Client {
     }
 
     async fn receive_pong(&self) -> Result<()> {
-        let recv = self.conn.accept_uni().await?;
+        let mut recv = self.conn.accept_uni().await?;
         let resp = recv.read_to_end(usize::MAX).await?;
         assert_eq!(PONG_MSG, resp.as_slice());
         Ok(())
@@ -447,7 +447,7 @@ impl Server {
         Ok(())
     }
 
-    async fn receive_ping(recv: RecvStream) -> Result<()> {
+    async fn receive_ping(mut recv: RecvStream) -> Result<()> {
         let req = recv
             .read_to_end(64 * 1024)
             .await
