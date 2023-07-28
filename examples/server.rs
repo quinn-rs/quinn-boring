@@ -22,19 +22,19 @@ use tracing_futures::Instrument as _;
 #[clap(name = "server")]
 struct Opt {
     /// directory to serve files from
-    #[clap(parse(from_os_str))]
+    #[arg(default_value = "./")]
     root: PathBuf,
     /// TLS private key in PEM format
-    #[clap(parse(from_os_str), short = 'k', long = "key", requires = "cert")]
+    #[arg(short = 'k', long = "key", requires = "cert")]
     key: Option<PathBuf>,
     /// TLS certificate in PEM format
-    #[clap(parse(from_os_str), short = 'c', long = "cert", requires = "key")]
+    #[arg(short = 'c', long = "cert", requires = "key")]
     cert: Option<PathBuf>,
     /// Enable stateless retries
-    #[clap(long = "stateless-retry")]
+    #[arg(long = "stateless-retry")]
     stateless_retry: bool,
     /// Address to listen on
-    #[clap(long = "listen", default_value = "[::1]:4433")]
+    #[arg(long = "listen", default_value = "127.0.0.1:4433")]
     listen: SocketAddr,
 }
 

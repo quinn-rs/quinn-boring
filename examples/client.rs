@@ -22,18 +22,19 @@ use url::Url;
 #[derive(Parser, Debug)]
 #[clap(name = "client")]
 struct Opt {
+    #[arg(default_value = "https://localhost:4433/Cargo.toml")]
     url: Url,
 
     /// Override hostname used for certificate verification
-    #[clap(long = "host")]
+    #[arg(long = "host")]
     host: Option<String>,
 
     /// Custom certificate authority to trust, in DER format
-    #[clap(parse(from_os_str), long = "ca")]
+    #[arg(long = "ca")]
     ca: Option<PathBuf>,
 
     /// Simulate NAT rebinding after connecting
-    #[clap(long = "rebind")]
+    #[arg(long = "rebind")]
     rebind: bool,
 }
 
