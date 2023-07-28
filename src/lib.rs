@@ -80,7 +80,12 @@ pub mod helpers {
     /// communicate within.
     pub fn client_endpoint(addr: SocketAddr) -> io::Result<quinn::Endpoint> {
         let socket = std::net::UdpSocket::bind(addr)?;
-        quinn::Endpoint::new(default_endpoint_config(), None, socket, TokioRuntime)
+        quinn::Endpoint::new(
+            default_endpoint_config(),
+            None,
+            socket,
+            Arc::new(TokioRuntime),
+        )
     }
 
     /// Helper to construct an endpoint for use with both incoming and outgoing connections
@@ -98,7 +103,7 @@ pub mod helpers {
             default_endpoint_config(),
             Some(config),
             socket,
-            TokioRuntime,
+            Arc::new(TokioRuntime),
         )
     }
 }
