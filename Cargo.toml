@@ -16,9 +16,9 @@ maintenance = { status = "passively-maintained" }
 fips = ["boring/fips", "boring-sys/fips"]
 
 [dependencies]
-# Switch back to cloudflare's repo once https://github.com/cloudflare/boring/pull/132 lands.
-boring = { git = "https://github.com/nmittler/boring/", branch = "hmac" }
-boring-sys = { git = "https://github.com/nmittler/boring/", branch = "hmac" }
+# TODO(nmittler): switch to standard release that includes https://github.com/cloudflare/boring/pull/136
+boring = { git = "https://github.com/cloudflare/boring/", rev = "74fd7a8" }
+boring-sys = { git = "https://github.com/cloudflare/boring/", rev = "74fd7a8" }
 bytes = "1"
 foreign-types-shared = "0.3.1"
 lru = "0.11.0"
