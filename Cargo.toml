@@ -16,9 +16,8 @@ maintenance = { status = "passively-maintained" }
 fips = ["boring/fips", "boring-sys/fips"]
 
 [dependencies]
-# TODO(nmittler): switch to standard release that includes https://github.com/cloudflare/boring/pull/136
-boring = { git = "https://github.com/cloudflare/boring/", rev = "74fd7a8" }
-boring-sys = { git = "https://github.com/cloudflare/boring/", rev = "74fd7a8" }
+boring = "3.0.2"
+boring-sys = "3.0.2"
 bytes = "1"
 foreign-types-shared = "0.3.1"
 lru = "0.11.0"
