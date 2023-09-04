@@ -29,7 +29,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 anyhow = "1.0.22"
-assert_hex = "0.2.2"
+assert_hex = "0.3.0"
 assert_matches = "1.1"
 clap = { version = "4.3", features = ["derive"] }
 directories-next = "2"
