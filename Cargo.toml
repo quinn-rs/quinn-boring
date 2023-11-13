@@ -16,7 +16,7 @@ maintenance = { status = "passively-maintained" }
 fips = ["boring/fips", "boring-sys/fips"]
 
 [dependencies]
-boring = "3.0.2"
+boring = "4.0.0"
 boring-sys = "3.0.2"
 bytes = "1"
 foreign-types-shared = "0.3.1"
