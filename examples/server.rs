@@ -15,8 +15,7 @@ use boring::pkey::PKey;
 use boring::x509::X509;
 use clap::Parser;
 use quinn_boring::QuicSslContext;
-use tracing::{error, info, info_span};
-use tracing_futures::Instrument as _;
+use tracing::{error, info, info_span, Instrument as _};
 
 #[derive(Parser, Debug)]
 #[clap(name = "server")]
