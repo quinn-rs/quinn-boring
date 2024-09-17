@@ -5,7 +5,7 @@
 use std::{
     fs,
     io::{self, Write},
-    net::ToSocketAddrs,
+    net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -22,20 +22,27 @@ use url::Url;
 #[derive(Parser, Debug)]
 #[clap(name = "client")]
 struct Opt {
-    #[arg(default_value = "https://localhost:4433/Cargo.toml")]
+    /// Perform NSS-compatible TLS key logging to the file specified in `SSLKEYLOGFILE`.
+    #[clap(long = "keylog")]
+    keylog: bool,
+
     url: Url,
 
     /// Override hostname used for certificate verification
-    #[arg(long = "host")]
+    #[clap(long = "host")]
     host: Option<String>,
 
     /// Custom certificate authority to trust, in DER format
-    #[arg(long = "ca")]
+    #[clap(long = "ca")]
     ca: Option<PathBuf>,
 
     /// Simulate NAT rebinding after connecting
-    #[arg(long = "rebind")]
+    #[clap(long = "rebind")]
     rebind: bool,
+
+    /// Address to bind on
+    #[clap(long = "bind", default_value = "[::]:0")]
+    bind: SocketAddr,
 }
 
 fn main() {
@@ -48,19 +55,20 @@ fn main() {
     let opt = Opt::parse();
     let code = {
         if let Err(e) = run(opt) {
-            eprintln!("ERROR: {}", e);
+            eprintln!("ERROR: {e}");
             1
         } else {
             0
         }
     };
-    std::process::exit(code);
+    ::std::process::exit(code);
 }
 
 #[tokio::main]
 async fn run(options: Opt) -> Result<()> {
     let url = options.url;
-    let remote = (url.host_str().unwrap(), url.port().unwrap_or(4433))
+    let url_host = strip_ipv6_brackets(url.host_str().unwrap());
+    let remote = (url_host, url.port().unwrap_or(4433))
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| anyhow!("couldn't resolve to an address"))?;
@@ -91,19 +99,15 @@ async fn run(options: Opt) -> Result<()> {
         }
     }
 
-    let mut endpoint = quinn_boring::helpers::client_endpoint("[::]:0".parse().unwrap())?;
+    let mut endpoint = quinn_boring::helpers::client_endpoint(options.bind)?;
     endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
 
     let request = format!("GET {}\r\n", url.path());
     let start = Instant::now();
     let rebind = options.rebind;
-    let host = options
-        .host
-        .as_ref()
-        .map_or_else(|| url.host_str(), |x| Some(x))
-        .ok_or_else(|| anyhow!("no hostname specified"))?;
+    let host = options.host.as_deref().unwrap_or(url_host);
 
-    eprintln!("connecting to {} at {}", host, remote);
+    eprintln!("connecting to {host} at {remote}");
     let conn = endpoint
         .connect(remote, host)?
         .await
@@ -116,16 +120,14 @@ async fn run(options: Opt) -> Result<()> {
     if rebind {
         let socket = std::net::UdpSocket::bind("[::]:0").unwrap();
         let addr = socket.local_addr().unwrap();
-        eprintln!("rebinding to {}", addr);
+        eprintln!("rebinding to {addr}");
         endpoint.rebind(socket).expect("rebind failed");
     }
 
     send.write_all(request.as_bytes())
         .await
         .map_err(|e| anyhow!("failed to send request: {}", e))?;
-    send.finish()
-        .await
-        .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
+    send.finish().unwrap();
     let response_start = Instant::now();
     eprintln!("request sent at {:?}", response_start - start);
     let resp = recv
@@ -146,6 +148,16 @@ async fn run(options: Opt) -> Result<()> {
     endpoint.wait_idle().await;
 
     Ok(())
+}
+
+fn strip_ipv6_brackets(host: &str) -> &str {
+    // An ipv6 url looks like eg https://[::1]:4433/Cargo.toml, wherein the host [::1] is the
+    // ipv6 address ::1 wrapped in brackets, per RFC 2732. This strips those.
+    if host.starts_with('[') && host.ends_with(']') {
+        &host[1..host.len() - 1]
+    } else {
+        host
+    }
 }
 
 fn duration_secs(x: &Duration) -> f32 {
