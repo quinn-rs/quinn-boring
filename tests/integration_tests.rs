@@ -116,9 +116,8 @@ async fn stateless_retry() -> Result<()> {
     let _guard = subscribe();
 
     // Run the server.
-    let mut server_config = server_config(server_crypto())?;
-    server_config.use_retry(true);
-    let server = Server::run(server_config)?;
+    let server_config = server_config(server_crypto())?;
+    let server = Server::run_with_retry(server_config, true)?;
 
     // Connect the client.
     let client_config = client_config(client_crypto());
@@ -258,7 +257,8 @@ async fn zero_rtt_rejected() -> Result<()> {
     // Hack to allow us to sleep between creating the stream and sending the message.
     async fn send_ping(mut send: SendStream) -> std::result::Result<(), WriteError> {
         send.write_all(PING_MSG).await?;
-        send.finish().await?;
+        send.finish()?;
+        send.stopped().await?;
         Ok(())
     }
 
@@ -325,7 +325,8 @@ impl Client {
     async fn send_ping(&self) -> std::result::Result<(), WriteError> {
         let mut send = self.conn.open_uni().await?;
         send.write_all(PING_MSG).await?;
-        send.finish().await?;
+        send.finish()?;
+        send.stopped().await?;
         Ok(())
     }
 
@@ -344,6 +345,9 @@ struct Server {
 
 impl Server {
     fn run(server_config: quinn::ServerConfig) -> Result<Arc<Self>> {
+        Self::run_with_retry(server_config, false)
+    }
+    fn run_with_retry(server_config: quinn::ServerConfig, use_retry: bool) -> Result<Arc<Self>> {
         let endpoint = quinn_boring::helpers::server_endpoint(server_config, local_address())?;
         let addr = endpoint.local_addr()?;
 
@@ -354,8 +358,27 @@ impl Server {
 
         let server2 = server.clone();
         tokio::spawn(async move {
-            while let Some(conn) = endpoint.accept().await {
-                let server = server2.clone();
+            while let Some(incoming) = endpoint.accept().await {
+                let server: Arc<Server> = server2.clone();
+                if use_retry && !incoming.remote_address_validated() {
+                    if let Err(e) = incoming.retry() {
+                        error!(
+                            "server: connection retry failed: {reason}",
+                            reason = e.to_string()
+                        )
+                    }
+                    continue;
+                }
+                let conn = match incoming.accept() {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        error!(
+                            "server: connection accept failed: {reason}",
+                            reason = e.to_string()
+                        );
+                        continue;
+                    }
+                };
                 tokio::spawn(async move {
                     let fut = server.handle_connection(conn);
                     if let Err(e) = fut.await {
@@ -462,8 +485,10 @@ impl Server {
             .map_err(|e| anyhow!("failed to send response: {}", e))?;
         // Gracefully terminate the stream
         send.finish()
-            .await
             .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
+        send.stopped()
+            .await
+            .map_err(|e| anyhow!("failed to stop stream: {}", e))?;
         Ok(())
     }
 }
@@ -523,24 +548,38 @@ fn server_crypto() -> ServerConfig {
 }
 
 /// Certificate Authority utility that can create new leaf certs.
-struct Ca(rcgen::Certificate);
+struct Ca(rcgen::CertifiedKey);
 
 impl Ca {
     /// Creates a new CA.
     fn new() -> Self {
-        let mut params = CertificateParams::new(&[] as &[String]);
-        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        let cert = rcgen::Certificate::from_params(params).unwrap();
+        let key_pair = rcgen::KeyPair::generate().expect("key pair generated");
 
-        Self(cert)
+        let mut params = CertificateParams::default();
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+
+        params.key_usages = vec![
+            rcgen::KeyUsagePurpose::DigitalSignature,
+            rcgen::KeyUsagePurpose::KeyEncipherment,
+            rcgen::KeyUsagePurpose::ContentCommitment,
+        ];
+
+        Self(rcgen::CertifiedKey {
+            cert: params.self_signed(&key_pair).unwrap(),
+            key_pair,
+        })
     }
 
     /// Creates a new leaf cert signed by this CA.
     fn new_leaf(&self, subject_alt_names: impl Into<Vec<String>>) -> Leaf {
-        let cert = rcgen::generate_simple_self_signed(subject_alt_names).unwrap();
-        let private_key = cert.serialize_private_key_der();
-        let cert = cert.serialize_der_with_signer(&self.0).unwrap();
-        let ca_cert = self.0.serialize_der().unwrap();
+        let key_pair = rcgen::KeyPair::generate().unwrap();
+        let certificate = CertificateParams::new(subject_alt_names)
+            .unwrap()
+            .signed_by(&key_pair, &self.0.cert, &self.0.key_pair)
+            .unwrap();
+        let private_key = key_pair.serialize_der();
+        let cert = certificate.der().to_vec();
+        let ca_cert = self.0.cert.der().to_vec();
         Leaf {
             private_key,
             cert,
