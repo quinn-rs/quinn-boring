@@ -171,12 +171,12 @@ impl Session {
 
         // Configure verification for the server hostname.
         ssl.set_verify_hostname(server_name)
-            .map_err(|_| ConnectError::InvalidDnsName(server_name.into()))?;
+            .map_err(|_| ConnectError::InvalidServerName(server_name.into()))?;
 
         // Set the SNI hostname.
         // TODO: should we validate the hostname?
         ssl.set_hostname(server_name)
-            .map_err(|_| ConnectError::InvalidDnsName(server_name.into()))?;
+            .map_err(|_| ConnectError::InvalidServerName(server_name.into()))?;
 
         // Set the transport parameters.
         ssl.set_quic_transport_params(&encode_params(params))

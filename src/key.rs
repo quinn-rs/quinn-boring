@@ -439,6 +439,10 @@ impl Debug for AeadKey {
 
 unsafe impl Send for AeadKey {}
 
+// EVP_AEAD_CTX_seal & EVP_AEAD_CTX_open allowed to be called concurrently on the same instance of EVP_AEAD_CTX
+// https://github.com/google/boringssl/blob/master/include/openssl/aead.h#L278
+unsafe impl Sync for AeadKey {}
+
 impl AeadKey {
     #[inline]
     pub(crate) fn new(suite: &'static CipherSuite, key: Key) -> Result<Self> {

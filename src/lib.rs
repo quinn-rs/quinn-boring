@@ -45,10 +45,7 @@ pub struct HandshakeData {
 
 pub mod helpers {
     use super::*;
-    use quinn::TokioRuntime;
     use quinn_proto::crypto;
-    use std::io;
-    use std::net::SocketAddr;
     use std::sync::Arc;
 
     /// Create a server config with the given [`crypto::ServerConfig`]
@@ -78,13 +75,14 @@ pub mod helpers {
     /// IPv6 address on Windows will not by default be able to communicate with IPv4
     /// addresses. Portable applications should bind an address that matches the family they wish to
     /// communicate within.
-    pub fn client_endpoint(addr: SocketAddr) -> io::Result<quinn::Endpoint> {
+    #[cfg(feature = "runtime-tokio")]
+    pub fn client_endpoint(addr: std::net::SocketAddr) -> std::io::Result<quinn::Endpoint> {
         let socket = std::net::UdpSocket::bind(addr)?;
         quinn::Endpoint::new(
             default_endpoint_config(),
             None,
             socket,
-            Arc::new(TokioRuntime),
+            Arc::new(quinn::TokioRuntime),
         )
     }
 
@@ -94,16 +92,17 @@ pub mod helpers {
     /// IPv6 address on Windows will not by default be able to communicate with IPv4
     /// addresses. Portable applications should bind an address that matches the family they wish to
     /// communicate within.
+    #[cfg(feature = "runtime-tokio")]
     pub fn server_endpoint(
         config: quinn::ServerConfig,
-        addr: SocketAddr,
-    ) -> io::Result<quinn::Endpoint> {
+        addr: std::net::SocketAddr,
+    ) -> std::io::Result<quinn::Endpoint> {
         let socket = std::net::UdpSocket::bind(addr)?;
         quinn::Endpoint::new(
             default_endpoint_config(),
             Some(config),
             socket,
-            Arc::new(TokioRuntime),
+            Arc::new(quinn::TokioRuntime),
         )
     }
 }
