@@ -15,27 +15,34 @@ use boring::pkey::PKey;
 use boring::x509::X509;
 use clap::Parser;
 use quinn_boring::QuicSslContext;
-use tracing::{error, info, info_span};
-use tracing_futures::Instrument as _;
+use tracing::{error, info, info_span, Instrument as _};
 
 #[derive(Parser, Debug)]
 #[clap(name = "server")]
 struct Opt {
+    /// file to log TLS keys to for debugging
+    #[clap(long = "keylog")]
+    keylog: bool,
     /// directory to serve files from
-    #[arg(default_value = "./")]
     root: PathBuf,
     /// TLS private key in PEM format
-    #[arg(short = 'k', long = "key", requires = "cert")]
+    #[clap(short = 'k', long = "key", requires = "cert")]
     key: Option<PathBuf>,
     /// TLS certificate in PEM format
-    #[arg(short = 'c', long = "cert", requires = "key")]
+    #[clap(short = 'c', long = "cert", requires = "key")]
     cert: Option<PathBuf>,
     /// Enable stateless retries
-    #[arg(long = "stateless-retry")]
+    #[clap(long = "stateless-retry")]
     stateless_retry: bool,
     /// Address to listen on
-    #[arg(long = "listen", default_value = "127.0.0.1:4433")]
+    #[clap(long = "listen", default_value = "[::1]:4433")]
     listen: SocketAddr,
+    /// Client address to block
+    #[clap(long = "block")]
+    block: Option<SocketAddr>,
+    /// Maximum number of concurrent connections to allow
+    #[clap(long = "connection-limit")]
+    connection_limit: Option<usize>,
 }
 
 fn main() {
@@ -48,7 +55,7 @@ fn main() {
     let opt = Opt::parse();
     let code = {
         if let Err(e) = run(opt) {
-            eprintln!("ERROR: {}", e);
+            eprintln!("ERROR: {e}");
             1
         } else {
             0
@@ -64,31 +71,22 @@ async fn run(options: Opt) -> Result<()> {
         let key = if key_path.extension().map_or(false, |x| x == "der") {
             PKey::private_key_from_der(&key)?
         } else {
-            let pkcs8 = rustls_pemfile::pkcs8_private_keys(&mut &*key)
-                .context("malformed PKCS #8 private key")?;
-            match pkcs8.into_iter().next() {
-                Some(x) => PKey::private_key_from_der(&x)?,
-                None => {
-                    let rsa = rustls_pemfile::rsa_private_keys(&mut &*key)
-                        .context("malformed PKCS #1 private key")?;
-                    match rsa.into_iter().next() {
-                        Some(x) => PKey::private_key_from_der(&x)?,
-                        None => {
-                            bail!("no private keys found");
-                        }
-                    }
-                }
-            }
+            let key = rustls_pemfile::private_key(&mut &*key)
+                .context("malformed PKCS #1 private key")?
+                .ok_or_else(|| anyhow::Error::msg("no private keys found"))?;
+            PKey::private_key_from_der(key.secret_der())?
         };
         let cert_chain = fs::read(cert_path).context("failed to read certificate chain")?;
         let cert_chain = if cert_path.extension().map_or(false, |x| x == "der") {
             vec![X509::from_der(&cert_chain)?]
         } else {
-            rustls_pemfile::certs(&mut &*cert_chain)
-                .context("invalid PEM-encoded certificate")?
-                .into_iter()
-                .map(|x| X509::from_der(&x).unwrap())
-                .collect()
+            let mut certs = Vec::new();
+            for cert in rustls_pemfile::certs(&mut &*cert_chain) {
+                let cert = cert.context("invalid PEM-encoded certificate")?;
+                let x509 = X509::from_der(&cert).context("invalid X509 cert")?;
+                certs.push(x509);
+            }
+            certs
         };
 
         (cert_chain, key)
@@ -100,12 +98,12 @@ async fn run(options: Opt) -> Result<()> {
         let key_path = path.join("key.der");
 
         let (cert, key) = match fs::read(&cert_path).and_then(|x| Ok((x, fs::read(&key_path)?))) {
-            Ok(x) => x,
+            Ok((cert, key)) => (cert, key),
             Err(ref e) if e.kind() == io::ErrorKind::NotFound => {
                 info!("generating self-signed certificate");
                 let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-                let key = cert.serialize_private_key_der();
-                let cert = cert.serialize_der().unwrap();
+                let key = cert.key_pair.serialize_der();
+                let cert = cert.cert.der().to_vec();
                 fs::create_dir_all(path).context("failed to create certificate directory")?;
                 fs::write(&cert_path, &cert).context("failed to write certificate")?;
                 fs::write(&key_path, &key).context("failed to write private key")?;
@@ -137,12 +135,8 @@ async fn run(options: Opt) -> Result<()> {
     ctx.check_private_key()?;
 
     let mut server_config = quinn_boring::helpers::server_config(Arc::new(server_crypto))?;
-    Arc::get_mut(&mut server_config.transport)
-        .unwrap()
-        .max_concurrent_uni_streams(0_u8.into());
-    if options.stateless_retry {
-        server_config.use_retry(true);
-    }
+    let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
+    transport_config.max_concurrent_uni_streams(0_u8.into());
 
     let root = Arc::<Path>::from(options.root.clone());
     if !root.exists() {
@@ -153,19 +147,33 @@ async fn run(options: Opt) -> Result<()> {
     eprintln!("listening on {}", endpoint.local_addr()?);
 
     while let Some(conn) = endpoint.accept().await {
-        info!("connection incoming");
-        let fut = handle_connection(root.clone(), conn);
-        tokio::spawn(async move {
-            if let Err(e) = fut.await {
-                error!("connection failed: {reason}", reason = e.to_string())
-            }
-        });
+        if options
+            .connection_limit
+            .map_or(false, |n| endpoint.open_connections() >= n)
+        {
+            info!("refusing due to open connection limit");
+            conn.refuse();
+        } else if Some(conn.remote_address()) == options.block {
+            info!("refusing blocked client IP address");
+            conn.refuse();
+        } else if options.stateless_retry && !conn.remote_address_validated() {
+            info!("requiring connection to validate its address");
+            conn.retry().unwrap();
+        } else {
+            info!("accepting connection");
+            let fut = handle_connection(root.clone(), conn);
+            tokio::spawn(async move {
+                if let Err(e) = fut.await {
+                    error!("connection failed: {reason}", reason = e.to_string())
+                }
+            });
+        }
     }
 
     Ok(())
 }
 
-async fn handle_connection(root: Arc<Path>, conn: quinn::Connecting) -> Result<()> {
+async fn handle_connection(root: Arc<Path>, conn: quinn::Incoming) -> Result<()> {
     let connection = conn.await?;
     let span = info_span!(
         "connection",
@@ -226,16 +234,14 @@ async fn handle_request(
     // Execute the request
     let resp = process_get(&root, &req).unwrap_or_else(|e| {
         error!("failed: {}", e);
-        format!("failed to process request: {}\n", e).into_bytes()
+        format!("failed to process request: {e}\n").into_bytes()
     });
     // Write the response
     send.write_all(&resp)
         .await
         .map_err(|e| anyhow!("failed to send response: {}", e))?;
     // Gracefully terminate the stream
-    send.finish()
-        .await
-        .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
+    send.finish().unwrap();
     info!("complete");
     Ok(())
 }

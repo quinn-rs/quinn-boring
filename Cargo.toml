@@ -13,37 +13,38 @@ rust-version = "1.70"
 maintenance = { status = "passively-maintained" }
 
 [features]
+default = ["runtime-tokio"]
 fips = ["boring/fips", "boring-sys/fips"]
+runtime-tokio = ["quinn/runtime-tokio"]
 
 [dependencies]
-boring = "3.0.2"
-boring-sys = "3.0.2"
+boring = "4"
+boring-sys = "4"
 bytes = "1"
-foreign-types-shared = "0.3.1"
-lru = "0.11.0"
-once_cell = "1.17"
-quinn = { version = "0.10.1", default_features = false, features = ["native-certs", "runtime-tokio"] }
-quinn-proto = { version = "0.10.1", default-features = false }
+foreign-types-shared = "0.3"
+lru = "0.12"
+once_cell = "1"
+quinn = { version = "0.11", default-features = false }
+quinn-proto = { version = "0.11", default-features = false }
 rand = "0.8"
 tracing = "0.1"
 
 [dev-dependencies]
-anyhow = "1.0.22"
-assert_hex = "0.2.2"
-assert_matches = "1.1"
-clap = { version = "4.3", features = ["derive"] }
+anyhow = "1.0"
+assert_matches = "1"
+clap = { version = "4", features = ["derive"] }
 directories-next = "2"
-hex-literal = "0.4.1"
-ring = "0.16.7"
-rcgen = "0.11.1"
-rustls-pemfile = "1.0.0"
-tokio = { version = "1.0.1", features = ["rt", "rt-multi-thread", "time", "macros", "sync"] }
-tracing-futures = { version = "0.2.0", default-features = false, features = ["std-future"] }
-tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
+hex-literal = "0.4"
+rcgen = "0.13"
+rustls-pemfile = "2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros", "sync"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
 url = "2"
 
 [[example]]
 name = "server"
+required-features = ["runtime-tokio"]
 
 [[example]]
 name = "client"
+required-features = ["runtime-tokio"]

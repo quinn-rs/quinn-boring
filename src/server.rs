@@ -108,11 +108,10 @@ impl crypto::ServerConfig for Config {
     fn initial_keys(
         &self,
         version: u32,
-        dcid: &ConnectionId,
-        side: Side,
+        dst_cid: &ConnectionId,
     ) -> StdResult<crypto::Keys, crypto::UnsupportedVersion> {
         let version = QuicVersion::parse(version)?;
-        let secrets = Secrets::initial(version, dcid, side).unwrap();
+        let secrets = Secrets::initial(version, dst_cid, Side::Server).unwrap();
         Ok(secrets.keys().unwrap().as_crypto().unwrap())
     }
 
